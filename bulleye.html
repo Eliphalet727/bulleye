@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日累積雨量牛眼偵測</title>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        /* Custom CSS for better styling */
+        body { font-family: sans-serif; }
+        .container { margin-top: 20px; }
+        th { background-color: #f2f2f2; }
+        .highlight { background-color: #ffcccc; } /* Highlight bulleye rows */
+        .table-responsive { overflow-x: auto; }
+
+        #rainfallTable {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>日累積雨量雨量牛眼偵測</h1>
+        <p>使用 IDW 方法檢測潛在的牛眼，資料來源：中央氣象署開放數據 API</p>
+
+        <div class="table-responsive">
+            <table id="rainfallTable" class="table table-striped table-bordered">
+                <thead>
+                    <tr>
+                        <th>觀測時間</th>
+                        <th>站碼</th>
+                        <th>站名</th>
+                        <th>高度</th>
+                        <th>觀測值</th>
+                        <th>觀測值等級</th>
+                        <th>IDW 值</th>
+                        <th>IDW 等級</th>
+                        <th>鄰近站雨量</th>
+                        <th>標準誤差</th>
+                        <th>鄰近站資訊</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.0.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="script-test.js"></script>
+</body>
+</html>
