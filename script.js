@@ -10,6 +10,21 @@ function calculateStandardError(values) {
     return { mean, stdError };
 }
 
+function calculateStandardError(values) {
+    if (!values || values.length === 0) {
+        return { mean: 0, stdError: 0 };
+    }
+    if (values.length === 1) {
+        return { mean: values[0], stdError: 0 }; // Avoid division by zero
+    }
+    const mean = values.reduce((sum, val) => sum + val, 0) / values.length;
+    const squaredSum = values.reduce((sum, val) => sum + (val - mean) ** 2, 0);
+    const variance = squaredSum / (values.length - 1); // Bessel's correction
+    const stdDev = Math.sqrt(variance);
+    const stdError = stdDev / Math.sqrt(values.length);
+    return { mean, stdError };
+}
+
 function idwInterpolation(nearbyStations, data, power) {
     let numerator = 0;
     let denominator = 0;
@@ -45,8 +60,8 @@ async function fetchRainfallData() {
         const data = await response.json();
 
         if (!data.success) {
-          console.error("Failed to fetch rainfall data:", data.msg);
-          return {};
+            console.error("Failed to fetch rainfall data:", data.msg);
+            return {};
         }
         const records = data.records.Station;
         const rainfallData = {};
@@ -54,12 +69,17 @@ async function fetchRainfallData() {
         records.forEach(record => {
             const stationId = record.StationId;
             const obstime = record.ObsTime.DateTime;
-            const precipitation = parseFloat(record.Rainfall.Now.Precipitation);
-
-            rainfallData[stationId] = {
-                obstime: obstime,
-                Precipitation: isNaN(precipitation) ? 0 : precipitation,
-            };
+             const precipitation = record.RainfallElement && record.RainfallElement.Now
+                ? parseFloat(record.RainfallElement.Now.Precipitation)
+                : NaN; 
+            if (!isNaN(precipitation) && precipitation >= 0) {
+                rainfallData[stationId] = {
+                    obstime: obstime,
+                    Precipitation: precipitation,
+                };
+            } else {
+                console.warn(`Invalid precipitation value for station ${stationId}:`, precipitation);
+            }
         });
         return rainfallData;
     } catch (error) {
@@ -80,10 +100,10 @@ async function fetchNearbyStations() {
 }
 
 async function processRainfallData() {
-    const power = 2; // IDW power parameter
-    const seThreshold = 6; // Standard error threshold
-    const rankDifference = 2; // acceptable rank diff
-    const valueDifference = 25; // acceptable value diff
+    const power = 2;
+    const seThreshold = 6;
+    const rankDifference = 2;
+    const valueDifference = 25;
 
     const colorBar = [
         [245, 245, 245, 0.1],
@@ -113,69 +133,75 @@ async function processRainfallData() {
     const allTableRows = [];
 
     for (const stationId in nearbyStationsData) {
-      if (rainfallData[stationId] !== undefined) { //check data exist
-        const station = nearbyStationsData[stationId];
-        const observedValue = rainfallData[stationId].Precipitation;
-        const nearbyStations = station.nearby_stations_info;
-        const obstime = rainfallData[stationId].obstime;
+        if (rainfallData[stationId] !== undefined) {
+            const station = nearbyStationsData[stationId];
+            const observedValue = rainfallData[stationId].Precipitation;
+            const nearbyStations = station.nearby_stations_info;
+            const obstime = rainfallData[stationId].obstime;
+
+            if (nearbyStations && Object.keys(nearbyStations).length > 0) {
+                const idwValue = idwInterpolation(nearbyStations, rainfallData, power);
+                const observedRank = determineRank(observedValue, colorBar);
+                const idwRank = determineRank(idwValue, colorBar);
+
+                const nearbyRainfalls = Object.keys(nearbyStations)
+                    .filter(nearbyId => rainfallData[nearbyId] !== undefined)
+                    .map(nearbyId => rainfallData[nearbyId].Precipitation);
+
+                const { mean, stdError } = calculateStandardError(nearbyRainfalls);
+                if (Math.abs(observedValue - mean) > seThreshold * stdError &&
+                    (Math.abs(observedRank - idwRank) > rankDifference && Math.abs(idwValue - observedValue) >= valueDifference))
+                {
+                    const nearbyStationsInfo = Object.keys(nearbyStations).map(nearbyId => {
+                        const nearbyStation = nearbyStations[nearbyId];
+
+                        const rainfall = (nearbyStation && nearbyStation.length > 7 && rainfallData[nearbyId])
+                            ? rainfallData[nearbyId].Precipitation.toFixed(2)
+                            : 'N/A';
+                        const department = (nearbyStation && nearbyStation.length > 6) ? nearbyStation[6] : 'N/A';
+                        const cname = (nearbyStation && nearbyStation.length > 0) ? nearbyStation[0] : 'N/A';
+                        const distance = (nearbyStation && nearbyStation.length > 7 && typeof nearbyStation[7] === 'number')
+                            ? nearbyStation[7].toFixed(2)
+                            : 'N/A';
+                        const alt = (nearbyStation && nearbyStation.length > 3)
+                            ? parseFloat(nearbyStation[3]).toFixed(1)  // Directly parseFloat
+                            : 'N/A';
+
+                        return `${department}-${cname}-${nearbyId} (${rainfall} mm, ${distance} km, ${alt} m)`;
+                    }).join(', ');
+
+                    const stationAltitude = isNaN(parseFloat(station.Alt)) ? 'N/A' : parseFloat(station.Alt).toFixed(1);
 
 
-        if (Object.keys(nearbyStations).length > 0) {
-            const idwValue = idwInterpolation(nearbyStations, rainfallData, power);
-            const observedRank = determineRank(observedValue, colorBar);
-            const idwRank = determineRank(idwValue, colorBar);
-
-            const nearbyRainfalls = Object.keys(nearbyStations)
-                .filter(nearbyId => rainfallData[nearbyId]!==undefined)
-                .map(nearbyId => rainfallData[nearbyId].Precipitation);
-
-            const { mean, stdError } = calculateStandardError(nearbyRainfalls);
-
-            if (Math.abs(observedValue - mean) > seThreshold * stdError &&
-                (Math.abs(observedRank - idwRank) > rankDifference && Math.abs(idwValue - observedValue) >= valueDifference)) {
-
-                const nearbyStationsInfo = Object.keys(nearbyStations).map(nearbyId => {
-                    const nearbyStation = nearbyStations[nearbyId];
-                    const rainfall = rainfallData[nearbyId] ? rainfallData[nearbyId].Precipitation.toFixed(2) : 'N/A';
-                    const department = nearbyStation[6] || 'N/A';
-                    const cname = nearbyStation[0] || 'N/A';
-                    const distance = nearbyStation[7] ? nearbyStation[7].toFixed(2) : 'N/A';
-                    const alt = nearbyStation[3] ? nearbyStation[3].toFixed(1) : 'N/A'; // Format altitude
-                    return `${department}-${cname}-${nearbyId} (${rainfall} mm, ${distance} km, ${alt} m)`;
-                }).join(', ');
-
-
-                const rowData = {
-                    obstime: obstime,
-                    stationId: stationId,
-                    stationName: station.CName,
-                    altitude: station.Alt, // Use Alt directly from nearby_stations.json
-                    observedValue: observedValue.toFixed(2),
-                    observedRank: observedRank,
-                    idwValue: idwValue.toFixed(2),
-                    idwRank: idwRank,
-                    meanRainfall: mean.toFixed(2),
-                    stdError: stdError.toFixed(2),
-                    nearbyStations: nearbyStationsInfo
-                };
-
-                allTableRows.push(rowData);
-
-
+                    const rowData = {
+                        obstime,
+                        stationId,
+                        stationName: station.CName,
+                        altitude: stationAltitude,  
+                        observedValue: observedValue.toFixed(2),
+                        observedRank,
+                        idwValue: idwValue.toFixed(2),
+                        idwRank,
+                        meanRainfall: mean.toFixed(2),
+                        stdError: stdError.toFixed(2),
+                        nearbyStations: nearbyStationsInfo
+                    };
+                    allTableRows.push(rowData);
+                }
             }
-          }
         }
     }
 
     allTableRows.sort((a, b) => new Date(a.obstime) - new Date(b.obstime));
 
     allTableRows.forEach(rowData => {
-
         const row = document.createElement('tr');
+
         if (Math.abs(rowData.observedValue - rowData.meanRainfall) > seThreshold * rowData.stdError &&
-            (Math.abs(rowData.observedRank - rowData.idwRank) > 2 && Math.abs(rowData.idwValue - rowData.observedValue) >= 25)) {
+            (Math.abs(rowData.observedRank - rowData.idwRank) > rankDifference && Math.abs(rowData.idwValue - rowData.observedValue) >= valueDifference)) {
             row.classList.add('highlight');
         }
+
         row.innerHTML = `
             <td>${rowData.obstime}</td>
             <td>${rowData.stationId}</td>
@@ -189,26 +215,25 @@ async function processRainfallData() {
             <td>${rowData.stdError}</td>
             <td>${rowData.nearbyStations}</td>
         `;
-      tableBody.appendChild(row);
+        tableBody.appendChild(row);
     });
 
-    // Initialize DataTables after populating the table
-    $(document).ready(function () {
+     $(document).ready(function () {
         $('#rainfallTable').DataTable({
-          "order": [[ 0, "desc" ]],  //order by time
-          "columns": [
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "8%" },
-            { "width": "20%" }  
-        ]
+            "order": [[0, "desc"]],
+            "columns": [
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "8%" },
+                { "width": "20%" }
+            ]
         });
     });
 }
